@@ -1,0 +1,32 @@
+# Binaries
+/server
+/mixi2-hometeyo-bot
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build artifacts
+*.test
+*.out
+
+# Dependency directories
+/vendor/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+
+# Env / secrets
+.env
+.env.*
+
+# Logs
+*.log
+
