@@ -38,5 +38,10 @@ jobs:
             --platform managed \
             --region ${{ env.REGION }} \
             --allow-unauthenticated \
-            --set-env-vars "SIGNATURE_PUBLIC_KEY=${{ secrets.SIGNATURE_PUBLIC_KEY }}"
+            --set-env-vars "SIGNATURE_PUBLIC_KEY=${{ secrets.SIGNATURE_PUBLIC_KEY }}" \
+            --set-env-vars "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" \
+            --set-env-vars "CLIENT_ID=${{ secrets.CLIENT_ID }}" \
+            --set-env-vars "CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}" \
+            --set-env-vars "TOKEN_URL=${{ secrets.TOKEN_URL }}" \
+            --set-env-vars "API_ADDRESS=${{ secrets.API_ADDRESS }}"
 
