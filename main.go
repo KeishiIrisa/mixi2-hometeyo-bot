@@ -87,6 +87,47 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 	}
 
 	log.Printf("Created reply post: %s", resp.GetPost().GetPostId())
+
+	// スタンプ一覧を取得し、Gemini に投稿に合うスタンプを選ばせる
+	stampsResp, err := h.client.GetStamps(authCtx, &application_apiv1.GetStampsRequest{
+		OfficialStampLanguage: constv1.LanguageCode_LANGUAGE_CODE_JP.Enum(),
+	})
+	if err != nil {
+		log.Printf("failed to get stamps: %v", err)
+		return nil
+	}
+
+	var stampOptions []StampOption
+	for _, set := range stampsResp.GetOfficialStampSets() {
+		for _, s := range set.GetStamps() {
+			if s.GetStampId() != "" {
+				stampOptions = append(stampOptions, StampOption{
+					StampId:    s.GetStampId(),
+					SearchTags: s.GetSearchTags(),
+				})
+			}
+		}
+	}
+
+	var stampID string
+	if len(stampOptions) > 0 {
+		stampID, err = h.gemini.SelectStamp(ctx, post.GetText(), imageURL, stampOptions)
+		if err != nil {
+			log.Printf("failed to select stamp: %v", err)
+		}
+	}
+
+	if stampID != "" {
+		_, err = h.client.AddStampToPost(authCtx, &application_apiv1.AddStampToPostRequest{
+			PostId:  post.GetPostId(),
+			StampId: stampID,
+		})
+		if err != nil {
+			log.Printf("failed to add stamp to post: %v", err)
+		} else {
+			log.Printf("Added stamp %s to post %s", stampID, post.GetPostId())
+		}
+	}
 	return nil
 }
 
