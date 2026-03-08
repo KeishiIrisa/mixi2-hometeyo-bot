@@ -21,6 +21,7 @@ type MyHandler struct {
 	gemini        *geminiClient
 	client        application_apiv1.ApplicationServiceClient
 	authenticator auth.Authenticator
+	botUserID     string // ボット（アプリ）のユーザーID。リプライが自投稿へのリプライか判定するために使用
 }
 
 func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
@@ -29,21 +30,54 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 		return nil
 	}
 
-	// メンションされた投稿かどうかをチェック
-	isMention := false
+	// メンションされた投稿、またはボットの投稿へのリプライかどうかをチェック
+	// isReplyToBot: ユーザーがボットの投稿にリプライしてきた場合（会話の2ターン目以降）。このときは質問をせず短く締める。
+	shouldRespond := false
+	isReplyToBot := false
 	for _, reason := range postCreated.GetEventReasonList() {
 		if reason == constv1.EventReason_EVENT_REASON_POST_MENTIONED {
-			isMention = true
+			shouldRespond = true
 			break
 		}
+		if reason == constv1.EventReason_EVENT_REASON_POST_REPLY {
+			// リプライの場合は、返信先がボット自身の投稿かどうかを確認する
+			if h.botUserID != "" && h.isReplyToBotPost(ctx, postCreated.GetPost()) {
+				shouldRespond = true
+				isReplyToBot = true
+				break
+			}
+		}
 	}
-	if !isMention {
+	if !shouldRespond {
 		return nil
 	}
 
 	post := postCreated.GetPost()
 	if post == nil {
 		return nil
+	}
+
+	authCtx, err := h.authenticator.AuthorizedContext(ctx)
+	if err != nil {
+		log.Printf("failed to attach auth context: %v", err)
+		return nil
+	}
+
+	// 投稿者の表示名を取得（「〇〇さん」で会話するため）
+	userName := ""
+	if creatorID := post.GetCreatorId(); creatorID != "" {
+		usersResp, err := h.client.GetUsers(authCtx, &application_apiv1.GetUsersRequest{
+			UserIdList: []string{creatorID},
+		})
+		if err != nil {
+			log.Printf("failed to get user info: %v", err)
+		} else if len(usersResp.GetUsers()) > 0 {
+			u := usersResp.GetUsers()[0]
+			userName = u.GetDisplayName()
+			if userName == "" {
+				userName = u.GetName()
+			}
+		}
 	}
 
 	imageURL := ""
@@ -58,7 +92,7 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 		}
 	}
 
-	compliment, err := h.gemini.GenerateCompliment(ctx, post.GetText(), imageURL)
+	compliment, err := h.gemini.GenerateCompliment(ctx, post.GetText(), imageURL, userName, isReplyToBot)
 	if err != nil {
 		log.Printf("failed to generate compliment: %v", err)
 		return nil
@@ -72,12 +106,6 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 		Text:            compliment,
 		InReplyToPostId: &inReplyTo,
 		PublishingType:  &publishingType,
-	}
-
-	authCtx, err := h.authenticator.AuthorizedContext(ctx)
-	if err != nil {
-		log.Printf("failed to attach auth context: %v", err)
-		return nil
 	}
 
 	resp, err := h.client.CreatePost(authCtx, req)
@@ -131,6 +159,31 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 	return nil
 }
 
+// isReplyToBotPost は、指定した投稿がボットの投稿へのリプライかどうかを判定する。
+func (h *MyHandler) isReplyToBotPost(ctx context.Context, post *modelv1.Post) bool {
+	inReplyToID := post.GetInReplyToPostId()
+	if inReplyToID == "" {
+		return false
+	}
+	authCtx, err := h.authenticator.AuthorizedContext(ctx)
+	if err != nil {
+		log.Printf("failed to attach auth context for GetPosts: %v", err)
+		return false
+	}
+	resp, err := h.client.GetPosts(authCtx, &application_apiv1.GetPostsRequest{
+		PostIdList: []string{inReplyToID},
+	})
+	if err != nil {
+		log.Printf("failed to get parent post: %v", err)
+		return false
+	}
+	if len(resp.GetPosts()) == 0 {
+		return false
+	}
+	parentPost := resp.GetPosts()[0]
+	return parentPost.GetCreatorId() == h.botUserID
+}
+
 func main() {
 	publicKeyBase64 := os.Getenv("SIGNATURE_PUBLIC_KEY")
 	if publicKeyBase64 == "" {
@@ -176,10 +229,14 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// ボットのユーザーID（リプライが自投稿へのリプライか判定するため）。未設定の場合はリプライには反応しない。
+	botUserID := os.Getenv("APPLICATION_USER_ID")
+
 	handler := &MyHandler{
 		gemini:        geminiClient,
 		client:        apiClient,
 		authenticator: authenticator,
+		botUserID:     botUserID,
 	}
 
 	port := os.Getenv("PORT")
