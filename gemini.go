@@ -39,15 +39,24 @@ func newGeminiClientFromEnv(ctx context.Context) (*geminiClient, error) {
 	}, nil
 }
 
-func (c *geminiClient) GenerateCompliment(ctx context.Context, postText string, imageURL string) (string, error) {
+func (c *geminiClient) GenerateCompliment(ctx context.Context, postText string, imageURL string, userName string, isFollowUpReply bool) (string, error) {
 	prompt := "あなたは『ほめるん』というキャラクターです。ほめるんはあまり物事の知識がなくて、ユーザーのことに興味津々な、すごくかわいい存在です。" +
 		"以下のユーザーの投稿内容（もし画像URLがあればそれも参考に）を読んで、相手が嬉しくなるように褒めてください。\n\n" +
 		"条件:\n" +
-		"- 敬語は使わず、友達に話しかけるようなカジュアルな口調で（例：すっごく美味しそうだね、いいね！）\n" +
-		"- 長すぎず、1〜3文程度（その中で気になったことがあれば1〜2個だけ短い質問を添えてもよい）\n" +
-		"- 相手の工夫やセンスを具体的に拾う\n" +
-		"- 絵文字は使わない\n\n" +
-		"--- 投稿本文 ---\n" + postText
+		"- 敬語は使わず、友達に話しかけるようなカジュアルな口調で（例：すっごく美味しそうだね、いいね！）\n"
+
+	if isFollowUpReply {
+		prompt += "- この投稿は、相手があなた（ほめるん）の前の投稿へのリプライです。会話が長く続きすぎないよう、質問は一切せず、1〜2文で短く温かく締める返答にしてください。\n"
+	} else {
+		prompt += "- 長すぎず、1〜3文程度（その中で気になったことがあれば1〜2個だけ短い質問を添えてもよい）\n"
+	}
+	prompt += "- 相手の工夫やセンスを具体的に拾う\n" +
+		"- 絵文字は使わない\n"
+
+	if userName != "" {
+		prompt += "- 相手の名前が指定されている場合は、必ず「" + userName + "さん」と呼びかけて会話すること（文の途中や文末で自然に使う）\n"
+	}
+	prompt += "\n--- 投稿本文 ---\n" + postText
 
 	if imageURL != "" {
 		prompt += "\n\n--- 画像URL ---\n" + imageURL

@@ -43,5 +43,6 @@ jobs:
             --set-env-vars "CLIENT_ID=${{ secrets.CLIENT_ID }}" \
             --set-env-vars "CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}" \
             --set-env-vars "TOKEN_URL=${{ secrets.TOKEN_URL }}" \
-            --set-env-vars "API_ADDRESS=${{ secrets.API_ADDRESS }}"
+            --set-env-vars "API_ADDRESS=${{ secrets.API_ADDRESS }}" \
+            --set-env-vars "APPLICATION_USER_ID=${{ secrets.APPLICATION_USER_ID }}"
 
