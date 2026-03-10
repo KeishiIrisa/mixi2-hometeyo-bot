@@ -12,7 +12,7 @@ import (
 
 // StampOption は Gemini に渡すスタンプ候補（ID とタグ情報）。
 type StampOption struct {
-	StampId   string
+	StampId    string
 	SearchTags []string
 }
 
@@ -39,7 +39,7 @@ func newGeminiClientFromEnv(ctx context.Context) (*geminiClient, error) {
 	}, nil
 }
 
-func (c *geminiClient) GenerateCompliment(ctx context.Context, postText string, imageURL string, userName string, isFollowUpReply bool) (string, error) {
+func (c *geminiClient) GenerateCompliment(ctx context.Context, postText string, imageURL string, userName string, isFollowUpReply bool, history string) (string, error) {
 	prompt := "あなたは『ほめるん』というキャラクターです。ほめるんはあまり物事の知識がなくて、ユーザーのことに興味津々な、すごくかわいい存在です。" +
 		"以下のユーザーの投稿内容（もし画像URLがあればそれも参考に）を読んで、相手が嬉しくなるように褒めてください。\n\n" +
 		"条件:\n" +
@@ -54,13 +54,20 @@ func (c *geminiClient) GenerateCompliment(ctx context.Context, postText string, 
 		"- 絵文字は使わない\n"
 
 	if userName != "" {
-		prompt += "- 相手の名前が指定されている場合は、必ず「" + userName + "さん」と呼びかけて会話すること（文の途中や文末で自然に使う）\n"
+		prompt += "- 相手の名前が指定されている場合は、「" + userName + "さん」と呼びかけても良い\n"
 	}
+
+	if history != "" {
+		prompt += "\n--- これまでの会話の流れ ---\n" + history +
+			"\n上記のやりとりをよく読んで、その文脈に自然につながる返答をしてください。同じ内容を繰り返しすぎず、会話が続いている雰囲気を大切にしてください。\n"
+	}
+
 	prompt += "\n--- 投稿本文 ---\n" + postText
 
 	if imageURL != "" {
 		prompt += "\n\n--- 画像URL ---\n" + imageURL
 	}
+	fmt.Println("[DEBUG] imageURL: ", imageURL)
 
 	resp, err := c.client.Models.GenerateContent(ctx, "gemini-2.5-flash-lite", []*genai.Content{
 		{
@@ -144,4 +151,3 @@ func (c *geminiClient) SelectStamp(ctx context.Context, postText string, imageUR
 	}
 	return "", nil
 }
-

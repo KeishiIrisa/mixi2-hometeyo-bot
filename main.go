@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/mixigroup/mixi2-application-sdk-go/auth"
 	"github.com/mixigroup/mixi2-application-sdk-go/event/webhook"
@@ -34,16 +36,20 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 	// isReplyToBot: ユーザーがボットの投稿にリプライしてきた場合（会話の2ターン目以降）。このときは質問をせず短く締める。
 	shouldRespond := false
 	isReplyToBot := false
+	var threadPosts []*modelv1.Post
 	for _, reason := range postCreated.GetEventReasonList() {
 		if reason == constv1.EventReason_EVENT_REASON_POST_MENTIONED {
 			shouldRespond = true
 			break
 		}
 		if reason == constv1.EventReason_EVENT_REASON_POST_REPLY {
-			// リプライの場合は、返信先がボット自身の投稿かどうかを確認する
-			if h.botUserID != "" && h.isReplyToBotPost(ctx, postCreated.GetPost()) {
+			// リプライの場合は、スレッド全体をたどってボットの投稿が含まれているかを確認し、
+			// ルートのユーザー投稿から現在の投稿までのポスト一覧を会話コンテキストとして取得する。
+			isReply, posts := h.collectThreadIfReplyToBot(ctx, postCreated.GetPost())
+			if h.botUserID != "" && isReply {
 				shouldRespond = true
 				isReplyToBot = true
+				threadPosts = posts
 				break
 			}
 		}
@@ -80,6 +86,33 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 		}
 	}
 
+	// ボットとの会話スレッド（ルート投稿から現在の投稿まで）があれば、Gemini に渡す用のテキストを構築する。
+	var historyText string
+	if len(threadPosts) > 0 {
+		var b strings.Builder
+		b.WriteString("これまでの会話の流れ:\n")
+		// threadPosts はルート投稿から現在の投稿までの順序で並んでいる前提。
+		for i, p := range threadPosts {
+			role := "ユーザー"
+			if p.GetCreatorId() == h.botUserID {
+				role = "ほめるん（あなた）"
+			}
+			text := p.GetText()
+			if text == "" {
+				continue
+			}
+			b.WriteString("- ")
+			b.WriteString(role)
+			b.WriteString("の投稿")
+			b.WriteString(" (")
+			b.WriteString(fmt.Sprintf("%d", i+1))
+			b.WriteString("): ")
+			b.WriteString(text)
+			b.WriteString("\n")
+		}
+		historyText = b.String()
+	}
+
 	imageURL := ""
 	if mediaList := post.GetPostMediaList(); len(mediaList) > 0 {
 		if media := mediaList[0]; media != nil {
@@ -92,7 +125,9 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 		}
 	}
 
-	compliment, err := h.gemini.GenerateCompliment(ctx, post.GetText(), imageURL, userName, isReplyToBot)
+	fmt.Println("[DEBUG] historyText: ", historyText)
+
+	compliment, err := h.gemini.GenerateCompliment(ctx, post.GetText(), imageURL, userName, isReplyToBot, historyText)
 	if err != nil {
 		log.Printf("failed to generate compliment: %v", err)
 		return nil
@@ -159,29 +194,68 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 	return nil
 }
 
-// isReplyToBotPost は、指定した投稿がボットの投稿へのリプライかどうかを判定する。
-func (h *MyHandler) isReplyToBotPost(ctx context.Context, post *modelv1.Post) bool {
-	inReplyToID := post.GetInReplyToPostId()
-	if inReplyToID == "" {
-		return false
+// collectThreadIfReplyToBot は、指定した投稿がボットの投稿を含むスレッドの一部かどうかを判定し、
+// その場合はルートのユーザー投稿から現在の投稿までのポスト一覧を返す。
+// 戻り値の bool は「スレッド内にボットの投稿が含まれているか」を表す。
+func (h *MyHandler) collectThreadIfReplyToBot(ctx context.Context, post *modelv1.Post) (bool, []*modelv1.Post) {
+	if post == nil {
+		return false, nil
 	}
+
 	authCtx, err := h.authenticator.AuthorizedContext(ctx)
 	if err != nil {
-		log.Printf("failed to attach auth context for GetPosts: %v", err)
-		return false
+		log.Printf("failed to attach auth context for GetPosts in collectThreadIfReplyToBot: %v", err)
+		return false, nil
 	}
-	resp, err := h.client.GetPosts(authCtx, &application_apiv1.GetPostsRequest{
-		PostIdList: []string{inReplyToID},
-	})
-	if err != nil {
-		log.Printf("failed to get parent post: %v", err)
-		return false
+
+	var chain []*modelv1.Post
+	current := post
+
+	// 返信チェーンを親方向にたどり、現在の投稿からルート投稿までを収集する。
+	for {
+		chain = append(chain, current)
+
+		inReplyToID := current.GetInReplyToPostId()
+		if inReplyToID == "" {
+			break
+		}
+
+		resp, err := h.client.GetPosts(authCtx, &application_apiv1.GetPostsRequest{
+			PostIdList: []string{inReplyToID},
+		})
+		if err != nil {
+			log.Printf("failed to get parent post in collectThreadIfReplyToBot: %v", err)
+			break
+		}
+		posts := resp.GetPosts()
+		if len(posts) == 0 {
+			break
+		}
+		current = posts[0]
 	}
-	if len(resp.GetPosts()) == 0 {
-		return false
+
+	if len(chain) == 0 {
+		return false, nil
 	}
-	parentPost := resp.GetPosts()[0]
-	return parentPost.GetCreatorId() == h.botUserID
+
+	// スレッド内にボットの投稿が含まれているかを判定。
+	hasBotPost := false
+	for _, p := range chain {
+		if p.GetCreatorId() == h.botUserID {
+			hasBotPost = true
+			break
+		}
+	}
+	if !hasBotPost {
+		return false, nil
+	}
+
+	// ルート（最初の投稿）から現在の投稿までの順序に並べ替える。
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+
+	return true, chain
 }
 
 func main() {
