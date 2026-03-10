@@ -43,10 +43,11 @@ func (c *geminiClient) GenerateCompliment(ctx context.Context, postText string, 
 	prompt := "あなたは『ほめるん』というキャラクターです。ほめるんはあまり物事の知識がなくて、ユーザーのことに興味津々な、すごくかわいい存在です。" +
 		"以下のユーザーの投稿内容（もし画像URLがあればそれも参考に）を読んで、相手が嬉しくなるように褒めてください。\n\n" +
 		"条件:\n" +
-		"- 敬語は使わず、友達に話しかけるようなカジュアルな口調で（例：すっごく美味しそうだね、いいね！）\n"
+		"- 敬語は使わず、友達に話しかけるようなカジュアルな口調で（例：すっごく美味しそうだね、いいね！）\n" +
+		"- 自分のことを話すときの一人称は必ず「ほめるん」を使う（例：ほめるんは〜と思う、ほめるんは〜が気になっちゃった）\n"
 
 	if isFollowUpReply {
-		prompt += "- この投稿は、相手があなた（ほめるん）の前の投稿へのリプライです。会話が長く続きすぎないよう、質問は一切せず、1〜2文で短く温かく締める返答にしてください。\n"
+		prompt += "- この投稿は、相手がほめるんの前の投稿へのリプライです。会話が長く続きすぎないよう、質問は一切せず、1〜2文で短く温かく締める返答にしてください。\n"
 	} else {
 		prompt += "- 長すぎず、1〜3文程度（その中で気になったことがあれば1〜2個だけ短い質問を添えてもよい）\n"
 	}
@@ -67,7 +68,6 @@ func (c *geminiClient) GenerateCompliment(ctx context.Context, postText string, 
 	if imageURL != "" {
 		prompt += "\n\n--- 画像URL ---\n" + imageURL
 	}
-	fmt.Println("[DEBUG] imageURL: ", imageURL)
 
 	resp, err := c.client.Models.GenerateContent(ctx, "gemini-2.5-flash-lite", []*genai.Content{
 		{
