@@ -36,10 +36,12 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 	// isReplyToBot: ユーザーがボットの投稿にリプライしてきた場合（会話の2ターン目以降）。このときは質問をせず短く締める。
 	shouldRespond := false
 	isReplyToBot := false
+	isMention := false
 	var threadPosts []*modelv1.Post
 	for _, reason := range postCreated.GetEventReasonList() {
 		if reason == constv1.EventReason_EVENT_REASON_POST_MENTIONED {
 			shouldRespond = true
+			isMention = true
 			break
 		}
 		if reason == constv1.EventReason_EVENT_REASON_POST_REPLY {
@@ -125,8 +127,6 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 		}
 	}
 
-	fmt.Println("[DEBUG] historyText: ", historyText)
-
 	compliment, err := h.gemini.GenerateCompliment(ctx, post.GetText(), imageURL, userName, isReplyToBot, historyText)
 	if err != nil {
 		log.Printf("failed to generate compliment: %v", err)
@@ -151,44 +151,49 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 
 	log.Printf("Created reply post: %s", resp.GetPost().GetPostId())
 
-	// スタンプ一覧を取得し、Gemini に投稿に合うスタンプを選ばせる
-	stampsResp, err := h.client.GetStamps(authCtx, &application_apiv1.GetStampsRequest{
-		OfficialStampLanguage: constv1.LanguageCode_LANGUAGE_CODE_JP.Enum(),
-	})
-	if err != nil {
-		log.Printf("failed to get stamps: %v", err)
-		return nil
-	}
-
-	var stampOptions []StampOption
-	for _, set := range stampsResp.GetOfficialStampSets() {
-		for _, s := range set.GetStamps() {
-			if s.GetStampId() != "" {
-				stampOptions = append(stampOptions, StampOption{
-					StampId:    s.GetStampId(),
-					SearchTags: s.GetSearchTags(),
-				})
-			}
-		}
-	}
-
-	var stampID string
-	if len(stampOptions) > 0 {
-		stampID, err = h.gemini.SelectStamp(ctx, post.GetText(), imageURL, stampOptions)
-		if err != nil {
-			log.Printf("failed to select stamp: %v", err)
-		}
-	}
-
-	if stampID != "" {
-		_, err = h.client.AddStampToPost(authCtx, &application_apiv1.AddStampToPostRequest{
-			PostId:  post.GetPostId(),
-			StampId: stampID,
+	// スタンプは「アプリがメンションされている投稿」に対してのみ付与する。
+	// リプライのみ（メンションなし）の場合にスタンプを付けようとすると、
+	// API 側で "can't stamp because application is not mentioned" エラーになるため。
+	if isMention {
+		// スタンプ一覧を取得し、Gemini に投稿に合うスタンプを選ばせる
+		stampsResp, err := h.client.GetStamps(authCtx, &application_apiv1.GetStampsRequest{
+			OfficialStampLanguage: constv1.LanguageCode_LANGUAGE_CODE_JP.Enum(),
 		})
 		if err != nil {
-			log.Printf("failed to add stamp to post: %v", err)
-		} else {
-			log.Printf("Added stamp %s to post %s", stampID, post.GetPostId())
+			log.Printf("failed to get stamps: %v", err)
+			return nil
+		}
+
+		var stampOptions []StampOption
+		for _, set := range stampsResp.GetOfficialStampSets() {
+			for _, s := range set.GetStamps() {
+				if s.GetStampId() != "" {
+					stampOptions = append(stampOptions, StampOption{
+						StampId:    s.GetStampId(),
+						SearchTags: s.GetSearchTags(),
+					})
+				}
+			}
+		}
+
+		var stampID string
+		if len(stampOptions) > 0 {
+			stampID, err = h.gemini.SelectStamp(ctx, post.GetText(), imageURL, stampOptions)
+			if err != nil {
+				log.Printf("failed to select stamp: %v", err)
+			}
+		}
+
+		if stampID != "" {
+			_, err = h.client.AddStampToPost(authCtx, &application_apiv1.AddStampToPostRequest{
+				PostId:  post.GetPostId(),
+				StampId: stampID,
+			})
+			if err != nil {
+				log.Printf("failed to add stamp to post: %v", err)
+			} else {
+				log.Printf("Added stamp %s to post %s", stampID, post.GetPostId())
+			}
 		}
 	}
 	return nil
