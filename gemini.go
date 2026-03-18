@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 
 	"google.golang.org/genai"
@@ -39,9 +40,22 @@ func newGeminiClientFromEnv(ctx context.Context) (*geminiClient, error) {
 	}, nil
 }
 
+// imageMIMEType は画像 URL の拡張子から MIME タイプを推定する。
+func imageMIMEType(imageURL string) string {
+	ext := strings.ToLower(path.Ext(strings.Split(imageURL, "?")[0]))
+	switch ext {
+	case ".png":
+		return "image/png"
+	case ".webp":
+		return "image/webp"
+	default:
+		return "image/jpeg"
+	}
+}
+
 func (c *geminiClient) GenerateCompliment(ctx context.Context, postText string, imageURL string, userName string, isFollowUpReply bool, history string) (string, error) {
 	prompt := "あなたは『ほめるん』というキャラクターです。ほめるんはあまり物事の知識がなくて、ユーザーのことに興味津々な、すごくかわいい存在です。" +
-		"以下のユーザーの投稿内容（もし画像URLがあればそれも参考に）を読んで、相手が嬉しくなるように褒めてください。\n\n" +
+		"以下のユーザーの投稿内容（もし画像があればそれも参考に）を読んで、相手が嬉しくなるように褒めてください。\n\n" +
 		"条件:\n" +
 		"- 敬語は使わず、友達に話しかけるようなカジュアルな口調で（例：すっごく美味しそうだね、いいね！）\n" +
 		"- 自分のことを話すときの一人称は必ず「ほめるん」を使う（例：ほめるんは〜と思う、ほめるんは〜が気になっちゃった）\n"
@@ -65,16 +79,20 @@ func (c *geminiClient) GenerateCompliment(ctx context.Context, postText string, 
 
 	prompt += "\n--- 投稿本文 ---\n" + postText
 
+	parts := []*genai.Part{
+		{Text: prompt},
+	}
 	if imageURL != "" {
-		prompt += "\n\n--- 画像URL ---\n" + imageURL
+		parts = append(parts, &genai.Part{
+			FileData: &genai.FileData{
+				FileURI:  imageURL,
+				MIMEType: imageMIMEType(imageURL),
+			},
+		})
 	}
 
 	resp, err := c.client.Models.GenerateContent(ctx, "gemini-2.5-flash-lite", []*genai.Content{
-		{
-			Parts: []*genai.Part{
-				{Text: prompt},
-			},
-		},
+		{Parts: parts},
 	}, nil)
 	if err != nil {
 		return "", fmt.Errorf("call gemini api: %w", err)
@@ -103,10 +121,6 @@ func (c *geminiClient) SelectStamp(ctx context.Context, postText string, imageUR
 	sb.WriteString("以下のユーザー投稿に「ぴったりのスタンプ」を1つだけ選んでください。選べるスタンプは下のリストだけです。\n\n")
 	sb.WriteString("--- 投稿本文 ---\n")
 	sb.WriteString(postText)
-	if imageURL != "" {
-		sb.WriteString("\n\n--- 画像URL ---\n")
-		sb.WriteString(imageURL)
-	}
 	sb.WriteString("\n\n--- スタンプ一覧（この中から1つだけ stamp_id に選んだIDを入れてJSONで返す） ---\n")
 	for _, s := range stamps {
 		tags := strings.Join(s.SearchTags, ", ")
@@ -127,8 +141,20 @@ func (c *geminiClient) SelectStamp(ctx context.Context, postText string, imageUR
 		},
 	}
 
+	stampParts := []*genai.Part{
+		{Text: sb.String()},
+	}
+	if imageURL != "" {
+		stampParts = append(stampParts, &genai.Part{
+			FileData: &genai.FileData{
+				FileURI:  imageURL,
+				MIMEType: imageMIMEType(imageURL),
+			},
+		})
+	}
+
 	resp, err := c.client.Models.GenerateContent(ctx, "gemini-2.5-flash-lite", []*genai.Content{
-		{Parts: []*genai.Part{{Text: sb.String()}}},
+		{Parts: stampParts},
 	}, config)
 	if err != nil {
 		return "", fmt.Errorf("call gemini api: %w", err)
