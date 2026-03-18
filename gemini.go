@@ -121,6 +121,11 @@ func (c *geminiClient) SelectStamp(ctx context.Context, postText string, imageUR
 		return "", nil
 	}
 
+	cleanedForStamp := strings.TrimSpace(strings.ReplaceAll(postText, "@hometeyo", ""))
+	if cleanedForStamp == "" && imageURL == "" {
+		return "o_eye", nil
+	}
+
 	var sb strings.Builder
 	sb.WriteString("以下のユーザー投稿に「ぴったりのスタンプ」を1つだけ選んでください。選べるスタンプは下のリストだけです。\n\n")
 	sb.WriteString("--- 投稿本文 ---\n")
