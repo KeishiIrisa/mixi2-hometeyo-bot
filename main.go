@@ -172,6 +172,7 @@ func (h *MyHandler) Handle(ctx context.Context, ev *modelv1.Event) error {
 						StampId:    s.GetStampId(),
 						SearchTags: s.GetSearchTags(),
 					})
+					log.Printf("[DEBUG] stamp: id=%s, tags=%v", s.GetStampId(), s.GetSearchTags())
 				}
 			}
 		}
