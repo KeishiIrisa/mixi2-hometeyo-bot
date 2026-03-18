@@ -78,6 +78,9 @@ func (c *geminiClient) GenerateCompliment(ctx context.Context, postText string, 
 	}
 
 	cleanedText := strings.TrimSpace(strings.ReplaceAll(postText, "@hometeyo", ""))
+	if cleanedText == "" && imageURL == "" {
+		return "ほめるんだよ！どうしたの？", nil
+	}
 	prompt += "\n--- 投稿本文 ---\n" + cleanedText
 
 	parts := []*genai.Part{
