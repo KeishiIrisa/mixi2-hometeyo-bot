@@ -77,7 +77,8 @@ func (c *geminiClient) GenerateCompliment(ctx context.Context, postText string, 
 			"\n上記のやりとりをよく読んで、その文脈に自然につながる返答をしてください。同じ内容を繰り返しすぎず、会話が続いている雰囲気を大切にしてください。\n"
 	}
 
-	prompt += "\n--- 投稿本文 ---\n" + postText
+	cleanedText := strings.TrimSpace(strings.ReplaceAll(postText, "@hometeyo", ""))
+	prompt += "\n--- 投稿本文 ---\n" + cleanedText
 
 	parts := []*genai.Part{
 		{Text: prompt},
